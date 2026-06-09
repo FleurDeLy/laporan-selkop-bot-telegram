@@ -225,6 +225,60 @@ supabase functions deploy daily-task-cron
 
 ---
 
+## 6. Secrets (Environment Variables)
+
+Secrets are securely stored in the **Supabase Dashboard → Edge Functions → Secrets**.
+
+| Secret Name | Purpose | How to Update (CLI) |
+|---|---|---|
+| `BOT_TOKEN` | Telegram Bot API token from @BotFather | `supabase secrets set BOT_TOKEN="new_token"` |
+| `CRON_SECRET` | Password authorizing the cron job | `supabase secrets set CRON_SECRET="password"` |
+| `GOOGLE_SHEETS_WEBHOOK_URL` | Apps Script Deployment URL | `supabase secrets set GOOGLE_SHEETS_WEBHOOK_URL="url"` |
+
+> [!WARNING]
+> If you change the `CRON_SECRET`, you **MUST** also update the SQL query in the `pg_cron` scheduler to match the new password, otherwise `daily-task-cron` will reject the request with a 401 Unauthorized error.
+
+---
+
+## 7. The Cron Scheduler (pg_cron)
+
+The database itself is responsible for triggering the `daily-task-cron` Edge Function. This is configured in the Supabase SQL Editor.
+
+```sql
+-- To update or install the schedule:
+SELECT cron.unschedule('selkop-4-hour-tasks');
+
+SELECT cron.schedule(
+    'selkop-4-hour-tasks', 
+    '0 */4 * * *',  -- Every 4 hours
+    $$
+    SELECT net.http_post(
+        url:='https://[YOUR_SUPABASE_PROJECT_REF].supabase.co/functions/v1/daily-task-cron',
+        headers:='{"Authorization": "Bearer [YOUR_CRON_SECRET]"}'::jsonb
+    )
+    $$
+);
+```
+
+---
+
+## 8. Common Troubleshooting
+
+* **Crash: "Bad Request: can't parse entities" on Telegram**
+  * *Cause:* You accidentally used `parse_mode: 'MarkdownV2'` and sent a string containing hyphens or periods.
+  * *Fix:* Always use `parse_mode: 'HTML'` for dynamic text generation.
+* **Crash: "ReferenceError: Buffer is not defined"**
+  * *Cause:* Supabase Edge Functions run on Deno. Native Node.js `Buffer` requires polyfills which can be unstable.
+  * *Fix:* Use Web Standard `TextEncoder` and `Uint8Array` to manipulate binary files in memory.
+* **Crash: "permission denied for table X"**
+  * *Cause:* Table was created manually via SQL editor without API grants.
+  * *Fix:* Run `GRANT ALL ON TABLE public."X" TO service_role, authenticated, anon;`
+* **Bot is silent / Not responding**
+  * *Cause:* The Telegram Webhook might have detached.
+  * *Fix:* Re-register the webhook by visiting this URL in your browser: `https://api.telegram.org/bot[BOT_TOKEN]/setWebhook?url=https://[YOUR_SUPABASE_PROJECT_REF].supabase.co/functions/v1/telegram-bot`
+
+---
+
 ## Quick Reference: What Lives Where
 
 | Component | Location | Who manages |
