@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Complete IT handover guide for the SELKOP Telegram Bot project. Covers GitHub setup, Supabase project/team access, secrets management, Google Sheets and Apps Script transfer, database SQL if rebuilding from scratch, Telegram bot registration, and CLI deploy instructions.",
+  "updatedAt": "2026-06-04T05:15:21.442663100Z"
+}
