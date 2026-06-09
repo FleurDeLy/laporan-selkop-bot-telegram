@@ -212,7 +212,8 @@ async function notifyPicsForCompletedTask(supabaseClient: any, staffChatId: numb
       .from('Users')
       .select('telegram_chat_id')
       .eq('role', 'pic')
-      .or(`outlet.eq."${staffOutlet}",outlet.is.null`);
+      // Use ilike and % wildcards to ignore accidental spaces around GLOBAL
+      .or(`outlet.eq."${staffOutlet}",outlet.ilike."%GLOBAL%"`); 
 
     if (picsError) {
       console.error("Failed to fetch target PICs for routing:", picsError);
@@ -476,70 +477,91 @@ Deno.serve(async (req: Request) => {
       }
 
       else if (text === '/monitor') {
-        const { data: sender } = await supabase.from('Users').select('role').eq('telegram_chat_id', chatId).maybeSingle()
-        if (sender?.role !== 'pic') {
-          await sendMessage(chatId, '❌ Akses ditolak. Perintah ini hanya untuk PIC.')
-          return new Response('OK', { status: 200 })
-        }
+        try {
+          // 1. Authorize the user and get their PIC scope
+          const { data: userData, error: userError } = await supabase
+            .from('Users')
+            .select('role, outlet')
+            .eq('telegram_chat_id', chatId)
+            .single();
 
-        // Compute today's WITA (UTC+8) boundary in UTC
-        const witaOffsetMs = 8 * 60 * 60 * 1000
-        const nowMs = Date.now()
-        const todayWitaStart = new Date(Math.floor((nowMs + witaOffsetMs) / 86400000) * 86400000 - witaOffsetMs)
-        const todayWitaEnd   = new Date(todayWitaStart.getTime() + 86400000)
-
-        // Fetch today's tasks and staff list — outlet added to staff query
-        const [{ data: staffList }, { data: todayTasks }] = await Promise.all([
-          supabase.from('Users').select('telegram_chat_id, name, outlet').eq('role', 'staff'),
-          supabase.from('Tasks').select('task_name, status, telegram_chat_id')
-            .gte('created_at', todayWitaStart.toISOString())
-            .lt('created_at', todayWitaEnd.toISOString())
-            .neq('status', 'failed')  // exclude soft-expired tasks from previous shifts
-        ])
-
-        if (!staffList || staffList.length === 0) {
-          await sendMessage(chatId, 'ℹ️ Belum ada staff yang terdaftar.')
-          return new Response('OK', { status: 200 })
-        }
-
-        // Group: outlet → [{ staffName, tasks[] }]
-        const grouped: Record<string, { staffName: string; tasks: { name: string; status: string }[] }[]> = {}
-
-        for (const staff of staffList) {
-          const staffTasks = (todayTasks || []).filter((t: any) => t.telegram_chat_id === staff.telegram_chat_id)
-          if (staffTasks.length === 0) continue
-
-          const branch = staff.outlet || 'Outlet Tidak Diketahui'
-          if (!grouped[branch]) grouped[branch] = []
-          grouped[branch].push({
-            staffName: staff.name,
-            tasks: staffTasks.map((t: any) => ({ name: t.task_name, status: t.status }))
-          })
-        }
-
-        const branches = Object.keys(grouped)
-        if (branches.length === 0) {
-          await sendMessage(chatId, 'ℹ️ Belum ada tugas tercatat untuk hari ini.')
-          return new Response('OK', { status: 200 })
-        }
-
-        // Build hierarchical message: Outlet → Staff → Tasks
-        let monitorMsg = '📊 <b>Monitor Tugas Hari Ini</b>\n\n'
-
-        for (const branch of branches) {
-          monitorMsg += `🏢 <b>${branch}</b>\n`
-          for (const entry of grouped[branch]) {
-            monitorMsg += `👤 <b>${entry.staffName}</b>\n`
-            for (const t of entry.tasks) {
-              const icon = t.status === 'done' ? '✅' : '⏳'
-              monitorMsg += `  ${icon} ${t.name}\n`
-            }
-            monitorMsg += '\n'
+          if (userError || !userData || userData.role !== 'pic') {
+            return new Response('OK', { status: 200 }); 
           }
-          monitorMsg += '──────────────\n\n'
-        }
 
-        await sendMessage(chatId, monitorMsg)
+          // 2. Defensive String Sanitization
+          const rawOutlet = userData.outlet || '';
+          const picOutlet = rawOutlet.trim().toUpperCase();
+          
+          // 3. "Silent Boss" Logic: Both GLOBAL and EMPTY get full access
+          const isGlobal = (picOutlet === 'GLOBAL' || picOutlet === 'EMPTY');
+          const displayScope = isGlobal ? 'GLOBAL' : rawOutlet;
+
+          // 4. Fetch scoped staff list
+          let staffQuery = supabase
+            .from('Users')
+            .select('telegram_chat_id, name, outlet, active_task_id')
+            .eq('role', 'staff');
+            
+          if (!isGlobal) {
+            staffQuery = staffQuery.eq('outlet', rawOutlet);
+          }
+          const { data: staffList } = await staffQuery;
+
+          // 5. Fetch today's tasks
+          const today = new Date().toISOString().split('T')[0]; 
+          const { data: todayTasks } = await supabase
+            .from('Tasks')
+            .select('telegram_chat_id, status, task_name') 
+            .gte('created_at', `${today}T00:00:00Z`)
+            .lte('created_at', `${today}T23:59:59Z`);
+
+          // 6. Construct the Ultimate Dashboard String
+          let monitorMsg = `📊 *Live Operations Monitor*\n*Scope:* ${displayScope}\n\n`;
+
+          if (!staffList || staffList.length === 0) {
+            monitorMsg += "Tidak ada staff yang terdaftar di outlet ini.";
+          } else {
+            for (const staff of staffList) {
+              // Filter tasks for this specific staff member
+              const staffTasks = (todayTasks || []).filter((t: any) => t.telegram_chat_id === staff.telegram_chat_id);
+              const totalTasks = staffTasks.length;
+              const completedTasks = staffTasks.filter((t: any) => t.status === 'Selesai' || t.status === 'done' || t.status === 'DONE').length; 
+              
+              const currentActivity = staff.active_task_id ? "🟢 (Sedang Bekerja)" : "⚪ (Standby)";
+
+              // Print High-Level Summary
+              monitorMsg += `👷‍♂️ *${staff.name}* (${staff.outlet})\n`;
+              monitorMsg += `Status: ${completedTasks}/${totalTasks} Selesai ${currentActivity}\n`;
+
+              // Print Itemized Detailed Breakdown
+              if (totalTasks > 0) {
+                for (const task of staffTasks) {
+                  const icon = (task.status === 'Selesai' || task.status === 'done' || task.status === 'DONE') ? '✅' : '⌛';
+                  monitorMsg += `${icon} ${task.task_name}\n`;
+                }
+              } else {
+                monitorMsg += `_Belum ada tugas hari ini._\n`;
+              }
+              monitorMsg += `\n`; // Add spacing between staff members
+            }
+          }
+
+          // 7. Send the report
+          await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: monitorMsg,
+              parse_mode: 'Markdown'
+            })
+          });
+          
+        } catch (error) {
+          console.error("Error generating /monitor dashboard:", error);
+        }
+        return new Response('OK', { status: 200 });
       }
 
       else if (text.startsWith('/recap')) {
