@@ -186,8 +186,28 @@ Deno.serve(async (req: Request) => {
       { headers: { 'Content-Type': 'application/json' }, status: 200 }
     )
 
-  } catch (err) {
+  } catch (err: any) {
     console.error('[FATAL ERROR] Cron Execution Exception:', err)
-    return new Response('Internal Server Error', { status: 500 })
+
+    const ADMIN_CHAT_ID = Deno.env.get('ADMIN_CHAT_ID');
+    if (BOT_TOKEN && ADMIN_CHAT_ID) {
+      const alertMsg = `🚨 *FATAL ERROR: Selkop Cron Job* 🚨\n\nSistem gagal melakukan eksekusi shift!\n\n*Log Error:*\n\`${err.message || String(err)}\``;
+
+      // Send the emergency message silently to the Admin
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: ADMIN_CHAT_ID,
+          text: alertMsg,
+          parse_mode: 'Markdown'
+        })
+      }).catch(networkErr => console.error("Failsafe network error:", networkErr)); 
+    }
+
+    return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), { 
+      headers: { 'Content-Type': 'application/json' },
+      status: 500 
+    })
   }
 })
