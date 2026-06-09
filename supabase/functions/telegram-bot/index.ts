@@ -190,6 +190,64 @@ async function handleRecapCommand(chatId: number, text: string): Promise<void> {
   }
 }
 
+async function notifyPicsForCompletedTask(supabaseClient: any, staffChatId: number, taskName: string, photoUrl: string) {
+  try {
+    // 1. Get the staff member's outlet context
+    const { data: staffData, error: staffError } = await supabaseClient
+      .from('Users')
+      .select('name, outlet')
+      .eq('telegram_chat_id', staffChatId)
+      .single();
+
+    if (staffError || !staffData) {
+      console.error("Failed to fetch staff context for routing:", staffError);
+      return;
+    }
+
+    const staffName = staffData.name;
+    const staffOutlet = staffData.outlet;
+
+    // 2. Query matching PICs (Targeted branch PICs OR Global PICs with no restrictions)
+    const { data: pics, error: picsError } = await supabaseClient
+      .from('Users')
+      .select('telegram_chat_id')
+      .eq('role', 'pic')
+      .or(`outlet.eq."${staffOutlet}",outlet.is.null`);
+
+    if (picsError) {
+      console.error("Failed to fetch target PICs for routing:", picsError);
+      return;
+    }
+
+    // 3. Format the operational report message
+    const reportMsg = `✅ *Tugas Kebersihan Selesai* ✅\n\n` +
+                      `*Outlet:* ${staffOutlet || 'GLOBAL'}\n` +
+                      `*Staff:* ${staffName}\n` +
+                      `*Tugas:* ${taskName}\n\n` +
+                      `Status telah diperbarui di Database & Spreadsheet.`;
+
+    const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN');
+    if (!BOT_TOKEN) return;
+
+    // 4. Broadcast dynamically to the filtered PIC list only
+    for (const pic of pics) {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: pic.telegram_chat_id,
+          photo: photoUrl,
+          caption: reportMsg,
+          parse_mode: 'Markdown'
+        })
+      }).catch(err => console.error(`Failed to send report to PIC ${pic.telegram_chat_id}:`, err));
+    }
+
+  } catch (err) {
+    console.error("Catastrophic error in PIC routing system:", err);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'GET') {
     return new Response('Telegram Bot Edge Function Online', { status: 200 })
@@ -309,18 +367,8 @@ Deno.serve(async (req: Request) => {
           await sendAnimation(chatId, randomGif)
         }
 
-        if (taskData && taskData.assigned_by) {
-          // Task was created via /addtask — notify the specific PIC who assigned it
-          await sendMessage(taskData.assigned_by, `✅ <b>Laporan Selesai!</b>\n\n<b>${firstName}</b> telah menyelesaikan tugas:\n<i>${taskData.task_name}</i>\n\n<a href="${photoUrl}">Lihat Bukti Foto</a>`)
-        } else {
-          // Task was created by cron job (assigned_by is null) — notify ALL PICs
-          const { data: pics } = await supabase.from('Users').select('telegram_chat_id').eq('role', 'pic')
-          if (pics && pics.length > 0) {
-            for (const pic of pics) {
-              await sendMessage(pic.telegram_chat_id, `✅ <b>Laporan Selesai!</b>\n\n<b>${firstName}</b> telah menyelesaikan tugas:\n<i>${taskData?.task_name}</i>\n\n<a href="${photoUrl}">Lihat Bukti Foto</a>`)
-            }
-          }
-        }
+        // Notify PICs using the new scoped routing layer
+        await notifyPicsForCompletedTask(supabase, chatId, taskData?.task_name || '-', photoUrl);
       } catch (err) {
         console.error('Photo Upload Exception:', err)
         await sendMessage(chatId, '❌ Gagal menyimpan foto. Silakan coba kirim ulang.')
