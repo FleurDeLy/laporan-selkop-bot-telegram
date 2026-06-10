@@ -327,7 +327,8 @@ Deno.serve(async (req: Request) => {
         const photoUrl = publicUrlData.publicUrl
 
         const completedAt = new Date()
-        await supabase.from('Tasks').update({ status: 'done', photo_url: photoUrl, completed_at: completedAt.toISOString() }).eq('id', activeTaskId)
+        const { data: updatedTask, error: updateError } = await supabase.from('Tasks').update({ status: 'done', photo_url: photoUrl, completed_at: completedAt.toISOString() }).eq('id', activeTaskId).select('task_name').single()
+        if (updateError) throw updateError
         await supabase.from('Users').update({ active_task_id: null }).eq('telegram_chat_id', chatId)
 
         // Build WITA timestamps directly — no view query needed
@@ -360,7 +361,8 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        await sendMessage(chatId, '✅ <b>Tugas Berhasil Diselesaikan!</b>\n\nBukti telah tersimpan. Ketik /tasks untuk mengecek sisa tugasmu.')
+        const taskNameDisplay = updatedTask?.task_name ? `<b>${updatedTask.task_name}</b> ` : ''
+        await sendMessage(chatId, `✅ Tugas ${taskNameDisplay}Berhasil Diselesaikan!\n\nBukti telah tersimpan. Ketik /tasks untuk mengecek sisa tugasmu.`)
 
         // 🎉 Send a random hype GIF to celebrate!
         if (HYPE_GIFS.length > 0) {
