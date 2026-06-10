@@ -1,0 +1,36 @@
+===================================================
+STEP 2: ENABLE AUTOMATED DAILY TASKS
+===================================================
+After running setup.bat, you must tell the database to trigger the daily cron job. 
+This requires the pg_cron and pg_net extensions (which are enabled by default on new Supabase projects).
+
+1. Go to your Supabase Cloud Dashboard -> Settings -> API.
+   - Copy your Project URL.
+   - Copy your Project API Key (anon / public).
+
+2. Go to the SQL Editor and click "New Query".
+
+3. Copy the SQL code below.
+
+4. IMPORTANT: 
+   - Replace `YOUR_NEW_PROJECT_URL` with your actual project URL.
+   - Replace `YOUR_NEW_ANON_KEY` with your actual anon key.
+
+5. Click "Run".
+
+--- COPY THE SQL BELOW ---
+
+-- 1. Ensure the necessary network extension is enabled
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+-- 2. Schedule the daily task trigger (Runs every day at midnight UTC)
+SELECT cron.schedule(
+  'trigger-daily-tasks',
+  '0 0 * * *',
+  $$
+  SELECT net.http_post(
+      url:='YOUR_NEW_PROJECT_URL/functions/v1/daily-task-cron',
+      headers:='{"Content-Type": "application/json", "Authorization": "Bearer YOUR_NEW_ANON_KEY"}'::jsonb
+  )
+  $$
+);
