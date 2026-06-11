@@ -510,42 +510,55 @@ Deno.serve(async (req: Request) => {
           }
           const { data: staffList } = await staffQuery;
 
-          // 5. Fetch today's tasks
-          const today = new Date().toISOString().split('T')[0]; 
-          const { data: todayTasks } = await supabase
-            .from('Tasks')
-            .select('telegram_chat_id, status, task_name') 
-            .gte('created_at', `${today}T00:00:00Z`)
-            .lte('created_at', `${today}T23:59:59Z`);
+          // 5. Define the strict 1-day boundary (Today's date bounds in UTC)
+          const now = new Date();
+          const startOfToday = new Date(now.setUTCHours(0, 0, 0, 0)).toISOString();
+          const endOfToday = new Date(now.setUTCHours(23, 59, 59, 999)).toISOString();
 
-          // 6. Construct the Ultimate Dashboard String
-          let monitorMsg = `📊 *Live Operations Monitor*\n*Scope:* ${displayScope}\n\n`;
+          // 6. Query only the current day's tasks to preserve the 1-day real-time view
+          const { data: todayTasks, error: tasksError } = await supabase
+            .from('Tasks')
+            .select('id, telegram_chat_id, task_name, status, created_at')
+            .gte('created_at', startOfToday)
+            .lte('created_at', endOfToday);
+
+          if (tasksError) throw tasksError;
+
+          // 7. Loop through staff and compile the exact 1-day real-time view
+          let monitorMsg = `📊 *LIVE MONITORING DASHBOARD (HARI INI)*\n*Scope:* ${displayScope}\n\n`;
 
           if (!staffList || staffList.length === 0) {
             monitorMsg += "Tidak ada staff yang terdaftar di outlet ini.";
           } else {
             for (const staff of staffList) {
-              // Filter tasks for this specific staff member
-              const staffTasks = (todayTasks || []).filter((t: any) => t.telegram_chat_id === staff.telegram_chat_id);
-              const totalTasks = staffTasks.length;
-              const completedTasks = staffTasks.filter((t: any) => t.status === 'Selesai' || t.status === 'done' || t.status === 'DONE').length; 
+              const rawStaffTasks = (todayTasks || []).filter((t: any) => t.telegram_chat_id === staff.telegram_chat_id);
+
+              // Deduplicate on task_name to keep the UI clean even if cron fires multiple times
+              const uniqueTaskMap = new Map();
+              for (const task of rawStaffTasks) {
+                const existingTask = uniqueTaskMap.get(task.task_name);
+                if (!existingTask || task.status === 'Selesai' || task.status === 'DONE' || task.status === 'done') {
+                  uniqueTaskMap.set(task.task_name, task);
+                }
+              }
               
+              const staffTasks = Array.from(uniqueTaskMap.values());
+              const totalTasks = staffTasks.length;
+              const completedTasks = staffTasks.filter((t: any) => t.status === 'Selesai' || t.status === 'DONE' || t.status === 'done').length;
               const currentActivity = staff.active_task_id ? "🟢 (Sedang Bekerja)" : "⚪ (Standby)";
 
-              // Print High-Level Summary
               monitorMsg += `👷‍♂️ *${staff.name}* (${staff.outlet})\n`;
               monitorMsg += `Status: ${completedTasks}/${totalTasks} Selesai ${currentActivity}\n`;
 
-              // Print Itemized Detailed Breakdown
               if (totalTasks > 0) {
                 for (const task of staffTasks) {
-                  const icon = (task.status === 'Selesai' || task.status === 'done' || task.status === 'DONE') ? '✅' : '⌛';
+                  const icon = (task.status === 'Selesai' || task.status === 'DONE' || task.status === 'done') ? '✅' : '⌛';
                   monitorMsg += `${icon} ${task.task_name}\n`;
                 }
               } else {
                 monitorMsg += `_Belum ada tugas hari ini._\n`;
               }
-              monitorMsg += `\n`; // Add spacing between staff members
+              monitorMsg += `\n`;
             }
           }
 
