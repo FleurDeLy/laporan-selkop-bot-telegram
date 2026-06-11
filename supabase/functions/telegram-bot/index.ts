@@ -452,7 +452,8 @@ Deno.serve(async (req: Request) => {
           `🔹 /help - Menampilkan panduan ini\n\n` +
           `<b>Perintah Khusus (PIC):</b>\n` +
           `🔸 /addtask - Memberikan tugas dadakan ke staff\n` +
-          `🔸 /monitor - Memantau seluruh progres tugas`
+          `🔸 /monitor - Memantau seluruh progres tugas\n` +
+          `🔸 /recap - Rekap laporan tugas (DD-MM-YYYY)`
         await sendMessage(chatId, helpMsg)
       }
 
