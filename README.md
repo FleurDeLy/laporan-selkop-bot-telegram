@@ -1,4 +1,4 @@
-# Selkop Operations Bot
+<img width="1920" height="917" alt="image" src="https://github.com/user-attachments/assets/edb5c587-e9ae-4614-bcde-e75d13951986" /># Selkop Operations Bot
 
 ## Executive Summary
 Selkop Operations Bot is a centralized, automated task management system built entirely on top of Telegram and Supabase. Designed for multi-branch environments, it transforms manual operational checklists into a trackable, real-time digital workflow. 
@@ -27,5 +27,6 @@ By utilizing Telegram as the front-end, it eliminates the need for staff to down
 * **Database:** PostgreSQL with relational mapping (`Users` -> `Tasks`).
 * **Automation:** Database-level Cron scheduling for zero-touch daily pipeline resets.
 
----
+---<img width="1920" height="917" alt="image" src="https://github.com/user-attachments/assets/611a6e22-3d2c-421a-a16c-0b2230af86c8" />
+
 *Built to streamline operations, enforce accountability, and provide executives with a crystal-clear view of their business from anywhere in the world.*
